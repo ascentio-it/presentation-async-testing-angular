@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+
+    <title>Async testing</title>
+
+    <link rel="stylesheet" href="dist/reset.css" />
+    <link rel="stylesheet" href="dist/reveal.css" />
+    <link rel="stylesheet" href="dist/theme/black.css" />
+
+    <!-- Theme used for syntax highlighted code -->
+    <link rel="stylesheet" href="plugin/highlight/monokai.css" />
+
+		<style>
+			.highlight {
+				background-color: white; color: black; border: 1px solid black;
+			}
+		</style>
+  </head>
+  <body>
+    <div class="reveal">
+      <div class="slides">
+        <section>
+					<section>
+            <h2>Testing async code in Angular</h2>
+						<img src="assets/angular-async.jpg">
+          </section>
+
+          <section>
+            <h2>Different strategies</h2>
+            <ol>
+              <li>Subscribe</li>
+              <li>Fake async</li>
+              <li>Fake timers</li>
+              <li>Marbles testing</li>
+            </ol>
+          </section>
+
+          <section>
+            <h2>Code to test</h2>
+            <pre>
+							<code class="hljs javascript" data-trim data-noescape>
+								@Component({
+									selector: 'lib-testing',
+									template: `
+									&lt;label&gt;{{ value }}&lt;/label&gt;
+									
+									&lt;button (click)="increment()" id="increment-button"&gt;increment&lt;/button&gt;
+									&lt;button (click)="decrement()" id="decrement-button"&gt;decrement&lt;/button&gt;
+									`
+								})
+								export class TestingComponent implements OnInit, OnDestroy {
+									value$ = new Subject<number>();
+									value: number = 0;
+								
+									ngOnInit(): void {
+										this.value$.pipe(debounceTime(2500)).subscribe((value) => {
+												this.value = value
+											});
+									}
+								
+									ngOnDestroy(): void {
+										if (this.value$) {
+											this.value$.unsubscribe();
+										}
+									}
+								
+									increment() {
+										setTimeout(() => {
+												this.value += 1;
+										}, 2500);
+									}
+								
+									decrement() {
+										const value = this.value - 1;
+										this.value$.next(value);
+									}
+								}
+							</code>
+						</pre>
+          </section>
+
+					<section>
+            <h2>Synchronous test</h2>
+            <pre>
+							<code class="hljs javascript" data-trim data-noescape>
+								it('should fail to register increment because of timeout in code', () => {
+									// fixture.debugElement.query(By.css('#increment-button')).triggerEventHandler('click', null);
+									clickIncrementButton();
+					
+									fixture.detectChanges();
+					
+									// fixture.debugElement.query(By.css('label')).nativeElement.innerHTML;
+									const value = getValueFromView();
+					
+									expect(value).toEqual('1');
+								});
+							</code>
+						</pre>
+          </section>
+
+					<section>
+						<img src="assets/synchronous-fail.png">
+					</section>
+        </section>
+
+				<section>
+					<section>
+						<h2>Subscribing without adding done</h2>
+						<pre>
+							<code class="hljs javascript" data-trim data-noescape>
+								it('does not actually call the expect without using done', () => {
+									clickDecrementButton();
+				
+									component.value$.subscribe(() => {
+										fixture.detectChanges();
+										const value = getValueFromView();
+
+										expect(value).toEqual('100');
+									});
+								});
+							</code>
+						</pre>
+					</section>
+
+					<section>
+						<img src="assets/subscribe-without-done.png" />
+					</section>
+
+					<section>
+						<h2>Subscribing</h2>
+						<pre>
+							<code class="hljs javascript" data-trim data-noescape>
+								it('should register because done gets called in the subscribe', (done) => {
+									component.value$.subscribe(() => {
+										fixture.detectChanges();
+										const value = getValueFromView();
+										
+										done();
+					
+										expect(value).toEqual('-1');
+									});
+					
+									clickDecrementButton();
+								});
+							</code>
+						</pre>
+					</section>
+				</section>
+					
+				<section>
+					<h2>fakeAsync</h2>
+					<pre>
+						<code class="hljs javascript" data-trim data-noescape>
+							it('should register with a tick of 2500 using fakeAsync', fakeAsync(() => {
+								clickIncrementButton();
+				
+								tick(2500);
+
+								fixture.detectChanges();
+								const value = getValueFromView();
+				
+								expect(value).toEqual('1');
+							}));
+						</code>
+					</pre>
+				</section>
+
+				<section>
+					<h2>Fake timer</h2>
+					<pre>
+						<code class="hljs javascript" data-trim data-noescape>
+							it('should register using fakeTimers', () => {
+								jest.useFakeTimers();
+								
+								clickDecrementButton();
+			
+								jest.advanceTimersByTime(2500)
+
+								fixture.detectChanges(); 
+								const value = getValueFromView();
+			
+								expect(value).toEqual('-1');
+
+								jest.runOnlyPendingTimers();
+							});
+						</code>
+					</pre>
+				</section>
+    
+        <section>
+          <section>
+            <h2>Marbles</h2>
+							<ul style=" display: block; text-align: left; margin: 0 0 0 1em;">
+								<li><label class="highlight">' '</label> whitespace: horizontal whitespace is ignored.</li>
+								<li><label class="highlight">'-'</label> frame: 1 "frame" of virtual time passing (see above description of frames).</li>
+								<li><label class="highlight">[0-9]+[ms|s|m]</label> time progression: </li>
+								<li><label class="highlight">'|'</label> complete: The successful completion of an observable.</li>
+								<li><label class="highlight">'#'</label> error: An error terminating the observable.</li>
+								<li><label class="highlight">[a-z0-9]</label> e.g. 'a'</li>
+							</ul>
+          </section>
+
+					<section>
+            <h2>Example service</h2>
+						<pre>
+							<code class="hljs javascript" data-trim data-noescape>
+								export class TestingService {
+									private value: number = 0;
+								
+									increment(): Observable&lt;number&gt; {
+										this.value++;
+								
+										return new Observable&lt;number&gt;((observer) => {
+											observer.next(this.value)
+										}).pipe(debounceTime(2500));
+									}
+								
+									decrement(): Observable&lt;number&gt; {
+										this.value--;
+										
+										return new Observable&lt;number&gt;((observer) => {
+											observer.next(this.value)
+										}).pipe(debounceTime(2500));
+									}
+								}
+							</code>
+						</pre>
+          </section>
+					
+					<section>
+						<h2>Test Scheduler</h2>
+						<pre>
+							<code class="hljs javascript" data-trim data-noescape>
+								const testScheduler = new TestScheduler((actual, expected) => {
+									expect(actual).toEqual(expected);
+								});
+
+								it('testScheduler', () => {
+									testScheduler.run((helpers) => {
+										helpers.expectObservable(testingService.decrement())
+											.toBe('2500ms a', {a: -1});
+									});
+								});
+							</code>
+						</pre>
+					</section>
+
+					<section>
+						<h2>Jasmine-marbles</h2>
+						<pre>
+							<code class="hljs javascript" data-trim data-noescape>
+								it('jasmine marbles', () => {
+										helpers.expectObservable(testingService.decrement())
+											.toBe('2500ms a', {a: -1});
+									});
+								});
+							</code>
+						</pre>
+					</section>
+        </section>
+      </div>
+    </div>
+
+    <script src="dist/reveal.js"></script>
+    <script src="plugin/notes/notes.js"></script>
+    <script src="plugin/markdown/markdown.js"></script>
+    <script src="plugin/highlight/highlight.js"></script>
+    <script>
+      // More info about initialization & config:
+      // - https://revealjs.com/initialization/
+      // - https://revealjs.com/config/
+      Reveal.initialize({
+        hash: true,
+
+        // Learn about plugins: https://revealjs.com/plugins/
+        plugins: [RevealMarkdown, RevealHighlight, RevealNotes],
+      });
+    </script>
+  </body>
+</html>
